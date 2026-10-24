@@ -73,7 +73,7 @@ jobs:
         run: |
           binary_name="entropick"
           executable="target/${{ matrix.target }}/release/$binary_name"
-          dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
+          dirname="$binary_name-${{ env.TAG_VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"
           mkdir "completions"
           "$executable" completions bash > "completions/${binary_name}.bash"
@@ -103,3 +103,48 @@ jobs:
         with:
           files: |
             ${{ env.ASSET }}
+
+  packslip:
+    needs: build-and-upload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: jdx/packslip@v1
+        id: packslip
+        with:
+          download: entropick-*.tar.gz entropick-*.zip
+          bin: entropick
+          upload: false
+          resources: |
+            completion/bash=archive:completions/entropick.bash
+            completion/zsh=archive:completions/_entropick
+            completion/fish=archive:completions/entropick.fish
+            completion/elvish=archive:completions/entropick.elv
+            completion/powershell=archive:completions/entropick.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packslip-bundle
+          path: ${{ steps.packslip.outputs.bundle }}
+          if-no-files-found: error
+
+  publish-packslip:
+    needs: packslip
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packslip-bundle
+          path: packslip
+      - name: Upload the signed bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -f packslip/packslip.sigstore.json
+          gh release upload "$GITHUB_REF_NAME" packslip/packslip.sigstore.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
